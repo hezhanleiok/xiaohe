@@ -1,0 +1,12 @@
+# 行尾统一成 LF，避免 Windows 上 core.autocrlf 把源码 checkout 成 CRLF，
+# 导致每次 diff 全文件变化（Go / Kotlin / Gradle 都吃 LF，没有兼容问题）。
+* text=auto eol=lf
+
+# 二进制：不要做行尾转换，也不要尝试文本 diff
+*.so binary
+*.jar binary
+*.aar binary
+*.apk binary
+*.png binary
+*.webp binary
+*.ttf binary

@@ -1,0 +1,40 @@
+# ---- Android / Gradle 构建产物 ----
+*.iml
+.gradle/
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+/app/build
+/build-engine-classes.jar
+
+# ---- 可重建的中间产物 ----
+# engine.aar 由 `gomobile bind` 从 engine/ 重新生成（步骤见 基线说明.md 第 1 节）。
+# 不进仓库：它是二进制、每次改 Go 代码都变、且体积 7.5MB。真要回到某个能装的状态，
+# 用 _lan/ 里对应版本的 APK，或者按说明重编 AAR。
+/app/libs/*.aar
+/app/libs/engine-sources.jar
+
+# ---- 发布包与临时目录 ----
+# APK 每个 ~37MB，历史版本全留会让仓库膨胀到 300MB+。发布包放 _lan/，
+# 由 _lan/index.html 提供局域网下载；仓库里只保留下载页。
+/_lan/*.apk
+/dist/
+/.tmp/
+/engine/.tmp/
+
+# ---- 工具链临时文件 ----
+*.log
+crash.log
+
+# ---- 会话上下文转储（一次性，不是项目资产）----
+/_ctx_asst.txt
+/_ctx_user.txt
+
+# ---- 本地密钥 / 签名 ----
+*.keystore
+*.jks

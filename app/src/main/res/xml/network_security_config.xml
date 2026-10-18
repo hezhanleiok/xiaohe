@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    IP / 出口探测刻意走纯 HTTP：省一次 TLS 握手，也不依赖证书链（探测本身只
+    要一个 IP 和一个国家代码）。targetSdk 28 起明文默认被禁，所以要在这里点名
+    放开；其余域名仍然强制 TLS。
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">ipinfo.io</domain>
+        <domain includeSubdomains="true">ip-api.com</domain>
+        <domain includeSubdomains="true">api.ip.sb</domain>
+    </domain-config>
+</network-security-config>

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>彼岸 Ther · 局域网下载</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 28px 20px;
+    font: 16px/1.55 -apple-system, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(170deg, #f7f8fa 0%, #eef1f5 100%); color: #12161c;
+  }
+  .card {
+    width: 100%; max-width: 420px; background: #fff; border-radius: 22px;
+    padding: 28px 24px 24px; box-shadow: 0 18px 50px rgba(18, 22, 28, .10), 0 2px 6px rgba(18, 22, 28, .05);
+  }
+  h1 { margin: 0 0 4px; font-size: 21px; letter-spacing: -.2px; }
+  .sub { margin: 0 0 20px; color: #6b7480; font-size: 13.5px; }
+  .meta { display: grid; grid-template-columns: auto 1fr; gap: 9px 14px; font-size: 13.5px; margin-bottom: 20px; }
+  .meta dt { color: #8a929d; }
+  .meta dd { margin: 0; font-variant-numeric: tabular-nums; word-break: break-all; }
+  .btn {
+    display: block; text-align: center; text-decoration: none; padding: 15px 18px;
+    border-radius: 14px; background: #12161c; color: #fff; font-weight: 600; font-size: 16px;
+  }
+  .btn:active { transform: scale(.985); background: #000; }
+  .note {
+    margin: 18px 0 0; padding: 13px 14px; border-radius: 12px; background: #f4f6f9;
+    font-size: 12.5px; color: #4b5560; line-height: 1.65;
+  }
+  .note b { color: #12161c; font-weight: 600; }
+  .hint { margin: 14px 0 0; font-size: 12px; color: #9aa2ac; line-height: 1.6; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: #6b7480; word-break: break-all; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <h1>彼岸 Ther</h1>
+    <p class="sub">局域网直装包 · 同一 Wi-Fi 下下载</p>
+
+    <dl class="meta">
+      <dt>版本</dt><dd>0.1.29 (30, debug)</dd>
+      <dt>架构</dt><dd>arm64-v8a</dd>
+      <dt>大小</dt><dd>36.9 MB</dd>
+      <dt>核心</dt><dd>wireguard-go + AWG · Aether 2.3.0 · Psiphon 2.3.0</dd>
+    </dl>
+
+    <a class="btn" href="ther-0.1.29-arm64.apk" download>下载 APK</a>
+
+    <div class="note">
+      <b>本次修复：不再「自动断开重连好几次」+ 首连提速 + 总时间压到 2 分钟</b><br>
+      · <b>你那份日志里最关键的三行</b>：<br>
+        <code>23:58:15.968 Retrying handshake because we stopped hearing back after 15 seconds</code><br>
+        <code>23:58:16.624 隧道连续 12s 传不动数据，判定断流</code><br>
+        <code>23:58:16.626 自动重连 1/2（重新扫描节点）</code><br>
+        引擎在 15s 时<strong>自己刚开始重握手</strong>，我们 0.6 秒后就把整个会话拆了 ——
+        正好杀掉它唯一能自愈的那次重握手，然后花 28s 重来一遍。这就是「断开重连好几次」。<br>
+      · <b>现在断流分三级</b>：12s 只记日志让引擎自愈 → 18s <strong>会话内换端点</strong>
+        （设备不重建、不重扫，换完主动握手，1~2 秒见分晓）→ 36s 才整会话重扫。<br>
+      · <b>扫描 IP 段对齐了</b>：WG / AWG / GOOL 外层现在都改成<strong>标准端口 2408/500/1701/4500 优先</strong>
+        （和你另一个项目一致），高位端口只做兜底。顺带把探活从「小样本全灭就扫全池 3810 个」
+        （那一次花了 23.5s）改成三级 + 8 秒硬预算。<br>
+      · <b>保活</b>：keepalive 上限从 25s 收到 12s（wireguard-go 的「听不到回应」判定是 15s，
+        比它长就等于让保活包自己去触发重握手）。<br>
+      · <b>质量</b>：连上几秒就断的端点会被记 30 分钟、下一轮排到最后，不再反复挑中它。<br>
+      · <b>总时间</b>：单次连接（含所有自动重扫轮次）硬上限 2 分钟，端点循环里也会按这个时间点收手。<br>
+      · 另外：启动失败时会把引擎日志先倒出来（以前失败的 6.5s 一个字原因都没留下）。
+    </div>
+
+    <p class="hint">
+      下载后如提示「未知来源」，允许浏览器安装即可。<br>
+      SHA256 <code>4c23ef87ad807ced3cf1edfffa9cd023b1712140608c6a664454d767a23187cd</code>
+    </p>
+  </main>
+</body>
+</html>
