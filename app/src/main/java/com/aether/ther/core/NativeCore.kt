@@ -117,6 +117,16 @@ class NativeCore(private val context: Context) : CoreEngine {
         private const val NESTED_KEEPALIVE = 10
 
         /**
+         * 「原生核心 + 赛风」里那条只给出站的隧道用自己的 MTU：1420。
+         *
+         * 见 [startWithPsiphon] 里的说明——它要装下「设备 1240 的 TCP 载荷 +
+         * 赛风的封装头」，否则一份载荷会被拆成两个 TCP 段，包数翻倍。
+         * 1420 加密后 1480，仍在物理网 1500 之内，不会触发 IP 分片。
+         * 设备的 tun MTU（[AppSettings.mtu]，默认 1280）不受影响。
+         */
+        private const val PSIPHON_TUNNEL_MTU = 1420
+
+        /**
          * GOOL 外层的 keepalive。
          *
          * 官方核心 `run_warp_in_warp` 建外层时用的就是 5s（内层 20s）。外层要一直
@@ -1060,7 +1070,18 @@ class NativeCore(private val context: Context) : CoreEngine {
             put("privateKey", identity.optString("privateKey"))
             put("peerPublicKey", identity.optString("peerPublicKey"))
             put("endpoint", endpoint)
-            put("mtu", cfg.mtu)
+            // ★ 赛风这条隧道的 MTU 单独给 1420，不再跟随设备的 cfg.mtu。
+            //
+            // 这条隧道里跑的不是设备原始 IP 包，而是「赛风封装后的 TCP 流」：
+            // 设备侧 tun MTU 是 1280，TCP MSS 因此是 1240，赛风在这个载荷上
+            // 还要再加自己的封装头（SSH/OSSH 几十字节）。1240+封装头 > 1240
+            // 时，赛风的一条载荷会被拆成两个 TCP 段发送 —— 包数直接翻倍，
+            // 每包都要再走一遍 gVisor 协议栈和 wireguard 加密。
+            //
+            // 1420 的 MSS 是 1380，装得下「设备 1240 + 赛风封装头」，一个
+            // 段的开销就能送完一份载荷。而 1420 加密后是
+            // 1420+32(WG)+20(IP)+8(UDP)=1480 < 1500，物理网不会分片。
+            put("mtu", PSIPHON_TUNNEL_MTU)
             // 只给赛风做出站的这条隧道空闲窗口必须短（见 NESTED_KEEPALIVE）。
             put("keepalive", NESTED_KEEPALIVE)
             put("address", identity.optString("ipv4"))

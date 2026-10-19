@@ -385,6 +385,24 @@ class AetherCore(private val context: Context) : CoreEngine {
             // 一样指 WG-in-WG，所以钉住 classic，别让它悄悄换协议。
             env["AETHER_GOOL_MODE"] = "classic"
         }
+        // ★ 把 netstack 的 TCP 缓冲（也就是它通告出去的窗口）调大。
+        //
+        // aether 内部用的是 smoltcp，而 smoltcp 把「socket 接收缓冲剩余空间」
+        // 直接当 TCP 窗口通告（aether 源码 sysprofile.rs 的注释就是这么写的）。
+        // 所以它这个缓冲就是下载的第二个天花板，同样是 窗口 / RTT：
+        //   High 档默认 2MB rx / 512KB tx，在 150ms RTT 上单流上限约 106Mbps，
+        //   到了 300ms 就只剩 53Mbps，再叠加链式隧道就更难看。
+        // 这就是「aether 核心的 WG / GOOL / MASQUE 比我们原生核心慢」的物理原因
+        // ——我们原生核心的 gVisor 栈给的是 8~16MB。
+        //
+        // 这里取 4MB / 1MB（默认的两倍），是内存和吞吐的折中：这两个缓冲是
+        // **每条连接预分配**的（源码注释：both halves are paid for up front on
+        // every connection），给到 gVisor 那种 16MB 在手机上会按并发数放大成
+        // 几百 MB。要再往上调，先确认目标机型的内存。
+        env["AETHER_NETSTACK_TCP_RX"] = (4 * 1024 * 1024).toString()
+        env["AETHER_NETSTACK_TCP_TX"] = (1 * 1024 * 1024).toString()
+        // 强制高档，免得低端机判定成 Medium/Low 后缓冲被压回 1MB/256KB。
+        env["AETHER_PERF_PROFILE"] = "high"
         return env
     }
 
@@ -806,6 +824,18 @@ class AetherCore(private val context: Context) : CoreEngine {
          *
          * 之前这份列表是「内置 14 个去掉 3 个 QUIC」的原始顺序，meek 夹在中间，
          * 网络稍差就会先挑中 meek，于是速度被锁死在 1~2Mbps。
+         *
+         * ★ 2026-10-19 再去掉两个 CDN 变体（FRONTED-MEEK-CDN-OSSH /
+         * FRONTED-MEEK-CDN-HTTP-OSSH），依据是对上游源码的比对：
+         *  - 官方 psiphon-tunnel-core 的 SupportedTunnelProtocols 只有 13 个，
+         *    **不含** FRONTED_MEEK_CDN / _HTTP_CDN / _QUIC_CDN 三个变体；
+         *  - 随包 aether 用的 fork（CluvexStudio/psiphon-tunnel-core，分支
+         *    shirokhorshid）是 16 个，把这三个保留了下来；
+         *  - 也就是说官方已经判定 CDN 前置这一档不再可用，而它又是 meek 里
+         *    最慢的一档（每往返一个载荷）。手机日志里出现的
+         *    `meek read payload failed` 正是这一类在退让。
+         * 这两个名字喂给官方二进制会直接被 Validate 拒绝
+         * （invalid tunnel protocol），去掉它们同时也让我们将来能换成官方构建。
          */
         val TCP_ONLY_PSIPHON_PROTOCOLS = listOf(
             "SHADOWSOCKS-OSSH",
@@ -816,9 +846,7 @@ class AetherCore(private val context: Context) : CoreEngine {
             "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
             "FRONTED-MEEK-OSSH",
             "SSH",
-            "FRONTED-MEEK-CDN-OSSH",
             "FRONTED-MEEK-HTTP-OSSH",
-            "FRONTED-MEEK-CDN-HTTP-OSSH",
         )
     }
 }

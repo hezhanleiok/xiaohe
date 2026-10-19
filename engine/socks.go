@@ -107,9 +107,12 @@ func startSocksTun(fd, mtu int, proxy, dns string, logs *logRing) (*socksTun, er
 	}
 
 	ep := channel.New(2048, uint32(mtu), "")
+	// 同 usernet.go：拥塞控制用 CUBIC。这一层面对的是「设备里的应用」，
+	// 本地 RTT 极小、窗口本来不是问题；但开赛风时赛风客户端到它服务器的
+	// RTT 会串到这条连接上，同样是高 BDP 场景。
 	st := stack.New(stack.Options{
 		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol, ipv6.NewProtocol},
-		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol, udp.NewProtocol},
+		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocolCUBIC, udp.NewProtocol},
 	})
 	if err := st.CreateNIC(socksTunNIC, ep); err != nil {
 		dev.Close()

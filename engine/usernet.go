@@ -164,9 +164,16 @@ func newUserNet(mtu int, ifaceAddr string, dns string, logs *logRing) (*userNet,
 		closed: make(chan struct{}),
 	}
 	ep := channel.New(4096, uint32(mtu), "")
+	// ★ 拥塞控制用 CUBIC，不用默认的 Reno。
+	//
+	// gVisor 的 tcp.NewProtocol() 是 Reno（protocol.go 里 newProtocol(s, ccReno,…)），
+	// 而这条链路的跨公网段 RTT 是秒级（赛风链实测 1.4~1.9s，普通 WG 也在
+	// 150~350ms）。Reno 在这种高 BDP 链路上窗口长不起来，一遇丢包还减半；
+	// CUBIC 用三次函数独立于 RTT 增长窗口，同样 RTT 下吞吐高得多。
+	// 上游 gVisor 自己的注释就写着「应该让 CUBIC 成为默认」。
 	st := stack.New(stack.Options{
 		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol, ipv6.NewProtocol},
-		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol, udp.NewProtocol},
+		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocolCUBIC, udp.NewProtocol},
 	})
 	if err := st.CreateNIC(userNetNIC, ep); err != nil {
 		return nil, fmt.Errorf("创建协议栈网卡失败: %v", err)
