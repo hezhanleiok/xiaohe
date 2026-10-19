@@ -12,8 +12,8 @@ android {
         applicationId = "com.aether.ther"
         minSdk = 26
         targetSdk = 35
-        versionCode = 31
-        versionName = "0.1.30"
+        versionCode = 32
+        versionName = "0.1.31"
 
         ndk {
             // engine.aar 目前只编了 arm64（真机都是 arm64）。armeabi-v7a 需要

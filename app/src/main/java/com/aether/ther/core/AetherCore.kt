@@ -102,6 +102,14 @@ class AetherCore(private val context: Context) : CoreEngine {
     @Volatile
     private var closing = false
 
+    /** 本次 start() 是否用了「记住的双跳」；失败时要清掉，否则每次都用一对死地址重试。 */
+    @Volatile
+    private var mimPeersReplayed = false
+
+    /** H3 的 turbo 扫描没选出网关时，重试一次 balanced（turbo 预算 45s，冷却期会提前放弃）。 */
+    @Volatile
+    private var balancedFallback = false
+
     private fun ensureAlive() {
         if (closing) throw IllegalStateException("连接已被新的会话取代")
     }
@@ -131,6 +139,53 @@ class AetherCore(private val context: Context) : CoreEngine {
     private fun defaultBinary(): File = File(nativeDir(), "libaether.so")
 
     private fun psiphonBinary(): File = File(nativeDir(), "libpsiphon.so")
+
+    // ------------------------------------------------------------------
+    // MASQUE-in-MASQUE 的双跳缓存
+    //
+    // 核心自己不会缓存 MIM 的两跳（它的 lastconn 只覆盖 masque-h3/h2/wireguard），
+    // 所以每次连接都要付一次扫描的钱。电脑版实测：verified 冷扫 69s，直接给定
+    // 两跳 10s。缓存放在核心自己的状态目录里，和身份文件同级——它是「这台机器
+    // 在当前网络量到的结果」，不是用户偏好，网络一变就应该作废。
+    // ------------------------------------------------------------------
+
+    private fun mimPeersFile(): File = File(coreDir(), "mim-peers.txt")
+
+    /** 形如 `1.2.3.4:443,5.6.7.8:443`；任何一段不是 ip:port 就当作没有缓存。 */
+    private fun loadMimPeers(): String? {
+        val raw = runCatching { mimPeersFile().readText().trim() }.getOrNull() ?: return null
+        val parts = raw.split(',').map { it.trim() }
+        if (parts.size != 2 || parts[0] == parts[1]) return null
+        if (!parts.all { HOST_PORT.matches(it) }) return null
+        return "${parts[0]},${parts[1]}"
+    }
+
+    private fun saveMimPeers(outer: String, inner: String) {
+        if (outer == inner || !HOST_PORT.matches(outer) || !HOST_PORT.matches(inner)) return
+        runCatching { mimPeersFile().writeText("$outer,$inner\n") }
+            .onSuccess { LogBus.i("AetherCore", "记住本次 MIM 双跳：$outer（外层）+ $inner（内层）") }
+    }
+
+    private fun clearMimPeers() {
+        runCatching { mimPeersFile().delete() }
+    }
+
+    /**
+     * 解析核心的双跳就绪行：
+     * `[+] masque-in-masque ready: 162.159.198.2:443 (outer) and 162.159.199.1:443 (inner)`
+     */
+    private fun mimPeersOf(line: String): Pair<String, String>? {
+        val marker = "masque-in-masque ready:"
+        val at = line.indexOf(marker)
+        if (at < 0) return null
+        val rest = line.substring(at + marker.length)
+        val sep = rest.indexOf(" and ")
+        if (sep <= 0) return null
+        val outer = rest.substring(0, sep).trim().removeSuffix("(outer)").trim()
+        val inner = rest.substring(sep + 5).trim().removeSuffix("(inner)").trim()
+        if (outer == inner || !HOST_PORT.matches(outer) || !HOST_PORT.matches(inner)) return null
+        return outer to inner
+    }
 
     private fun binaryOrNull(): File? {
         val configured = SettingsStore.load(context).aetherCorePath
@@ -224,19 +279,44 @@ class AetherCore(private val context: Context) : CoreEngine {
         startLogThread(p)
 
         // ① 先等 warp 隧道：官方要先扫描 + 端到端校验，之后才把 SOCKS 打开。
-        //    MASQUE 扫描的官方预算是 120s，所以这里给 180s 而不是 90s
+        //    MASQUE 扫描的官方预算是 120s，所以 H2/MIM 给 180s 而不是 90s
         //    （2026-10-17：90s 会在 MASQUE 扫描还没结束时就被我们掐掉）。
         //
-        //    例外是 MASQUE H3：它走 QUIC(UDP/443)，在国内移动网被整段限速/丢包时
-        //    核心会一直卡在「深校验」阶段（2026-10-17 实测：候选 rtt 2.9~3.2s，
-        //    90s 都没选出网关）。这种情况下干等 180s 没有意义，到点就自动换成
-        //    H2 —— 同一条 MASQUE 隧道，只是把传输从 QUIC 换成 TCP/443。
-        val tunnelWait =
-            if (cfg.protocol == WireProtocol.MASQUE_H3 && !h2Fallback) H3_GATEWAY_WAIT_MS else TUNNEL_WAIT_MS
+        //    MASQUE H3 走 turbo（45s 预算，正常 7s），失败由下面的 catch 先重试
+        //    一次 balanced（120s），两次都空才降级 H2 —— 本网络 H2 的 TCP/443 被
+        //    DPI 打断，所以「降级 H2」实际等于失败，不能作为第一选择。
+        val tunnelWait = when {
+            h2Fallback -> TUNNEL_WAIT_MS
+            cfg.protocol == WireProtocol.MASQUE_H3 -> H3_GATEWAY_WAIT_MS
+            else -> TUNNEL_WAIT_MS
+        }
         try {
             waitForPort(p, warpPort, tunnelWait, "WARP 隧道")
         } catch (e: IllegalStateException) {
+            // 记住的双跳失效了（换网络/POP 变了/边缘下线）：删掉再扫。
+            // 不删的话每次连接都会拿同一对死地址重试，且永远失败在同一个地方。
+            if (cfg.protocol == WireProtocol.MASQUE_IN_MASQUE && mimPeersReplayed) {
+                clearMimPeers()
+                LogBus.w("AetherCore", "上次记住的 MIM 双跳已失效，已清除；下次改用 verified 重新扫描")
+            }
             if (cfg.protocol != WireProtocol.MASQUE_H3 || h2Fallback) throw e
+            // turbo 只有 45s 预算，端点处在冷却期时会提前放弃；先给一次完整的
+            // balanced 扫描（120s），再谈降级 H2 —— 本网络 TCP/443 被 DPI 打断，
+            // 降到 H2 基本等于宣告失败。
+            if (!balancedFallback) {
+                LogBus.w(
+                    "AetherCore",
+                    "MASQUE H3 的 turbo 扫描在 ${tunnelWait / 1000}s 内没选出网关（QUIC/UDP/443）" +
+                        "→ 改用 balanced 完整扫描再试一次。",
+                )
+                Hub.update { it.copy(message = "H3 快速扫描没结果，改用完整扫描…") }
+                balancedFallback = true
+                return try {
+                    start(cfg, tunFd)
+                } finally {
+                    balancedFallback = false
+                }
+            }
             LogBus.w(
                 "AetherCore",
                 "MASQUE H3 在 ${tunnelWait / 1000}s 内没选出可用网关（QUIC/UDP/443 这条线路不通或极慢）" +
@@ -375,6 +455,41 @@ class AetherCore(private val context: Context) : CoreEngine {
                 env["AETHER_MASQUE_HTTP2"] = "0"
             }
         }
+        // ★ 扫描模式（2026-10-19 官方源码 aether/src/lib.rs + 电脑版实测同源结论）：
+        //
+        //   - H3 用 turbo：balanced 会扫满 120s 预算才提交（本机实测 123s 才出网关），
+        //     turbo 是「第一个候选就提交」，实测 7s。turbo 在端点冷却期可能提前
+        //     放弃（预算 45s），所以失败时用 balancedFallback 再给一次 balanced。
+        //   - MIM 用 verified：核心在非 verified 模式下把内层候选取成外层同 /24 的
+        //     邻居（sibling_candidates），那些边缘会对内层 connect-ip 回
+        //     CRYPTO_ERROR 0x128，永远连不上；verified 才会「两跳分属不同 /24」。
+        //     上次成功的两跳被记住时直接回放，跳过扫描（实测 10s vs 69s）。
+        when {
+            h2Fallback || protocol == WireProtocol.MASQUE_H2 -> env["AETHER_SCAN"] = "balanced"
+            protocol == WireProtocol.MASQUE_IN_MASQUE -> {
+                val peers = loadMimPeers()
+                if (peers != null) {
+                    env["AETHER_MIM_PEERS"] = peers
+                    mimPeersReplayed = true
+                    LogBus.i("AetherCore", "MIM：复用上次双跳 $peers（跳过扫描）")
+                } else {
+                    mimPeersReplayed = false
+                    env["AETHER_SCAN"] = "verified"
+                    LogBus.i("AetherCore", "MIM：扫描模式强制 verified（两跳必须在不同 /24）")
+                }
+            }
+            protocol == WireProtocol.MASQUE_H3 ->
+                env["AETHER_SCAN"] = if (balancedFallback) "balanced" else "turbo"
+        }
+        // IP 栈：电脑版默认 v4，并记录过「dual 会挑 IPv6 端点 → verify timeout」。
+        env["AETHER_IP"] = "v4"
+        // MASQUE 自己的启动预算：verified 扫描 60s + 内层最多 6×12s，150s 才够；
+        // H3/turbo 给 60s 只是兜底（核心默认 30s 会在扫描中途放弃）。
+        env["AETHER_MASQUE_STARTUP_SECS"] = when {
+            h2Fallback || protocol == WireProtocol.MASQUE_H2 -> "180"
+            protocol == WireProtocol.MASQUE_IN_MASQUE -> "150"
+            else -> "60"
+        }
         // 只有 WireGuard 类吃这个 profile；MASQUE 保持核心自己的 firewall 默认。
         if (protocol == WireProtocol.AETHER_WG || protocol == WireProtocol.AETHER_GOOL) {
             env["AETHER_NOIZE"] = "gfw"
@@ -470,6 +585,9 @@ class AetherCore(private val context: Context) : CoreEngine {
                     // 刷很多遍，然后一直等到超时。这些行出现多次就说明这条路已经废了，
                     // 立即失败去换端点，别让用户等满 25s×2。
                     if (!psiphonReady && isUpstreamFatal(line)) psiphonFatalHits++
+                    // 记下 MIM 的两跳：核心自己不缓存（lastconn 只覆盖 h3/h2/wg），
+                    // 没有它每次连接都要付 60s 的 verified 扫描。
+                    mimPeersOf(line)?.let { (outer, inner) -> saveMimPeers(outer, inner) }
                     ExitLog.parse(line)?.let { exit ->
                         LogBus.i("Exit", "核心上报出口：${exit.ip}（${exit.country.ifBlank { "??" }}）")
                         // 不写核心自报的延迟：那是它建连时一次性量到的握手/探测耗时，
@@ -785,6 +903,9 @@ class AetherCore(private val context: Context) : CoreEngine {
         /** 随包发布的官方版本，只用于日志对齐。 */
         const val CORE_VERSION = "2.3.0"
 
+        /** 足够严格：核心只会给出字面 ip:port，别让半截文件变成 AETHER_MIM_PEERS。 */
+        val HOST_PORT = Regex("""^\d{1,3}(?:\.\d{1,3}){3}:\d{1,5}$""")
+
         /** 隧道（含 MASQUE 扫描，官方预算 120s）。 */
         const val TUNNEL_WAIT_MS = 180_000L
 
@@ -809,8 +930,15 @@ class AetherCore(private val context: Context) : CoreEngine {
          */
         const val PSIPHON_FATAL_HITS = 3
 
-        /** MASQUE H3 选网关的耐心：正常 5~15s 就能通，超过这个数基本就是 QUIC 被限。 */
-        const val H3_GATEWAY_WAIT_MS = 75_000L
+        /**
+         * MASQUE H3 选网关的耐心。
+         *
+         * 75s 是旧的错误值：核心自己的扫描预算是 **120s**（balanced 会扫满才提交），
+         * 75s 必然在扫描结束前掐断，然后降级到本网络根本不通的 H2 —— 这就是
+         * 「手机 MASQUE H3 永远连不上」的直接原因。现在 H3 先用 turbo（预算 45s，
+         * 正常 7s 出网关），失败再 balanced（120s），所以这里给 150s 覆盖两次尝试。
+         */
+        const val H3_GATEWAY_WAIT_MS = 150_000L
 
         /**
          * 赛风里**只走 TCP、且认 UpstreamProxyURL** 的隧道协议。

@@ -42,36 +42,36 @@
     <p class="sub">局域网直装包 · 同一 Wi-Fi 下下载</p>
 
     <dl class="meta">
-      <dt>版本</dt><dd>0.1.30 (31, debug)</dd>
+      <dt>版本</dt><dd>0.1.31 (32, debug)</dd>
       <dt>架构</dt><dd>arm64-v8a</dd>
       <dt>大小</dt><dd>36.9 MB</dd>
       <dt>核心</dt><dd>wireguard-go + AWG · Aether 2.3.0 · Psiphon 2.3.0</dd>
     </dl>
 
-    <a class="btn" href="ther-0.1.30-arm64.apk" download>下载 APK</a>
+    <a class="btn" href="ther-0.1.31-arm64.apk" download>下载 APK</a>
 
     <div class="note">
-      <b>本次：赛风出口提速四项（含一项实测无效，已如实记录）</b><br>
-      · <b>① 赛风协议列表去掉两个 CDN 变体</b>
-        （<code>FRONTED-MEEK-CDN-OSSH</code>、<code>FRONTED-MEEK-CDN-HTTP-OSSH</code>）。
-        依据：官方 psiphon 的 <code>SupportedTunnelProtocols</code> 只有 13 个、已不含这两个；
-        随包 aether 用的 fork 是 16 个、把它们保留了。它们又是 meek 里最慢的一档。<br>
-      · <b>② 赛风那条只给出站的隧道 MTU 由跟随设备改为固定 1420</b>：设备 MSS=1240，
-        赛风封装后超过它会把一份载荷拆成两个 TCP 段，包数翻倍。1420 加密后 1480 &lt; 1500，不分片。<br>
-      · <b>③ 两个 gVisor 协议栈的拥塞控制由默认 Reno 换成 CUBIC</b>
-        （<code>engine/usernet.go</code>、<code>engine/socks.go</code>）。<br>
-      · <b>④ Aether 核心 netstack 窗口</b>：通过 <code>AETHER_NETSTACK_TCP_RX/TX</code>
-        把 smoltcp 的 TCP 缓冲（即通告窗口）由 High 档默认 2MB/512KB 提到 4MB/1MB。
-        这是 aether 核心 WG / GOOL / MASQUE 比原生核心慢的物理原因。<br>
-      · <b style="color:#b45309">实测结论（真机 speedtest）：以上四项对赛风速度没有可观测提升。</b>
-        0.1.29 手动选 SG 出口 23.53 / 24.86 Mbps，0.1.30 仍是 20 多 Mbps，两者相当。
-        <strong>赛风速度的第一杠杆是出口地区</strong>（自动选到 US 时 6.74 Mbps，手动选 SG 后 ~24 Mbps，
-        差 3.5 倍），这项在设置里改即可，不需要发版。
+      <b>本次：MASQUE H3 与 MASQUE-in-MASQUE 的连接修复</b><br>
+      · <b>① MASQUE H3：等网关的预算 75s → 150s，并改用 turbo 快速扫描</b>。
+        核心自己的扫描预算是 120s，旧代码 75s 就掐断进程再降级到 H2；
+        而这条网络里 TCP/443 被 DPI 打断，降级 H2 实际就是「连不上」。
+        现在 turbo 正常 7s 出网关；失败先重试一次 balanced（120s），两次都空才降 H2。<br>
+      · <b>② MASQUE in MASQUE 现在能连了</b>：根因不是服务端不支持，而是扫描模式选错。
+        核心在非 verified 模式下会把内层候选取成外层同 /24 的邻居，那些边缘对
+        内层 connect-ip 回 <code>CRYPTO_ERROR 0x128</code>，所以 12 个候选全失败、
+        外层被判定失败后无限重扫。现在 MIM 强制 <code>AETHER_SCAN=verified</code>
+        （官方为 gool/mim 设计的模式，两跳分属不同 /24），首次约 60–70s 连通。<br>
+      · <b>③ MIM 记住上次成功的两跳</b>（<code>files/core/mim-peers.txt</code>），
+        下次直接回放、跳过扫描，约 10s；失败会自动清除并回到 verified 重扫。<br>
+      · <b>④ 补上 <code>AETHER_IP=v4</code> 与 MASQUE 启动预算</b>：
+        dual 会挑到 IPv6 端点导致 verify timeout；MIM/H2 的预算是 150/180s。<br>
+      · 说明：这两条 MASQUE 修复在电脑版 1.2.5 上先落地并实测（H3 7s、MIM 10.4s），
+        手机版照同一组参数移植。
     </div>
 
     <p class="hint">
       下载后如提示「未知来源」，允许浏览器安装即可。<br>
-      SHA256 <code>815df23eb57f0cafd0fa18d28bed9491cc460c0c6d9db1815ff08e2ce4d9ec68</code>
+      SHA256 <code>5378ac89eafced1db726f05d520da523415e1c953a6b6f9598338fa583a0bb36</code>
     </p>
   </main>
 </body>
