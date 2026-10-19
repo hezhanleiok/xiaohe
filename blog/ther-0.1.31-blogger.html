@@ -1,0 +1,105 @@
+<!--
+  彼岸 Ther 0.1.31 博客文章（Google Blogger 用）
+
+  使用方法：
+  1. Blogger → 新建文章 → 右上角切换到「HTML 视图」→ 把本文件从下面第一行 <div> 开始的内容整段粘贴进去。
+  2. 搜索并替换三个占位符（文末按钮）：
+       https://example.com/ther-0.1.31-arm64.apk
+       https://mirror.example.com/ther-0.1.31-arm64.apk
+       https://github.com/your-account/ther
+  3. 全文只用内联样式，不含 <style>/<script>/外链，不会和 Blogger 主题冲突。
+-->
+
+<div style="max-width:720px;margin:0 auto;font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;color:#1a1f26;line-height:1.75;font-size:16px;">
+
+  <p style="margin:0 0 6px;font-size:13px;letter-spacing:.08em;color:#8a929d;"> ANDROID · 版本 0.1.31</p>
+  <h1 style="margin:0 0 14px;font-size:30px;line-height:1.3;letter-spacing:-.5px;">彼岸 Ther 0.1.31：MASQUE H3 提速，MASQUE-in-MASQUE 真正可用</h1>
+
+  <p style="margin:0 0 18px;color:#4b5560;">彼岸 Ther 是一个 Android 端的隐私网络客户端：一条隧道里可以选择不同的承载方式（WireGuard / MASQUE / 双层隧道），也能把出口换成 Psiphon 或 Tor。这一版只做一件事——把 MASQUE 这条路修到能用、能快。</p>
+
+  <hr style="border:0;border-top:1px solid #e6e9ee;margin:26px 0;">
+
+  <h2 style="margin:0 0 12px;font-size:21px;">这一版做了什么</h2>
+
+  <h3 style="margin:22px 0 8px;font-size:17px;">1. MASQUE H3：不再在成功前 45 秒被掐断</h3>
+  <p style="margin:0 0 10px;">旧版本等网关只给 75 秒，而 aether 核心自己的扫描预算是 120 秒——时间一到，进程被杀，接着自动降级到 H2。偏偏这类网络里 TCP/443 正是 DPI 的重点目标，降级 H2 等于宣告失败。</p>
+  <p style="margin:0 0 10px;">0.1.31 改成：先用 <code style="background:#f4f6f9;padding:1px 5px;border-radius:4px;font-size:13.5px;">turbo</code> 扫描（拿到第一个可用网关就建链，实测 <strong>7 秒</strong>），失败再退回一次完整扫描（120 秒），两次都空才考虑 H2。等网关的总预算提到 150 秒。</p>
+
+  <h3 style="margin:22px 0 8px;font-size:17px;">2. MASQUE in MASQUE：不是服务端不支持，是扫描模式选错了</h3>
+  <p style="margin:0 0 10px;">双层 MASQUE 的做法是：先建一条外层 MASQUE 隧道，再从这条隧道<strong>里面</strong>拨第二条 MASQUE。内层落点的选择很关键——</p>
+  <ul style="margin:0 0 12px;padding-left:22px;color:#3d4854;">
+    <li style="margin:6px 0;">非 <code style="background:#f4f6f9;padding:1px 5px;border-radius:4px;font-size:13.5px;">verified</code> 模式：核心会取<strong>外层地址同一个 /24 的邻居</strong>当内层。这些边缘与外层落在同一个入口，收到内层请求直接关闭连接（QUIC 错误码 <code style="background:#f4f6f9;padding:1px 5px;border-radius:4px;font-size:13.5px;">0x128</code>）。实测 12 个候选全部被拒，界面一直停在「连接中」。</li>
+    <li style="margin:6px 0;"><code style="background:#f4f6f9;padding:1px 5px;border-radius:4px;font-size:13.5px;">verified</code> 模式：优先选<strong>不同 /24</strong>、且被验证过能承载 MASQUE 的边缘。内层一次握手成功，出口地址也随之改变。</li>
+  </ul>
+  <p style="margin:0 0 10px;">所以 0.1.31 对 MIM 强制使用 verified 扫描（第一次约 60–70 秒），并把成功的两跳记在本地（<code style="background:#f4f6f9;padding:1px 5px;border-radius:4px;font-size:13.5px;">mim-peers.txt</code>）。下次连接直接复用，跳过扫描，约 <strong>10 秒</strong>。网络变了导致旧两跳失效时，客户端会自动清掉缓存、重新扫描，不会卡在死地址上。</p>
+
+  <h3 style="margin:22px 0 8px;font-size:17px;">3. 另外三处加固</h3>
+  <ul style="margin:0 0 12px;padding-left:22px;color:#3d4854;">
+    <li style="margin:6px 0;">固定 <code style="background:#f4f6f9;padding:1px 5px;border-radius:4px;font-size:13.5px;">AETHER_IP=v4</code>：双栈会让核心挑到 IPv6 端点，数据面校验超时，表现就是「握手成功但什么都打不开」。</li>
+    <li style="margin:6px 0;">补上 MASQUE 的启动预算（MIM 150 秒 / H2 180 秒）：核心默认 30 秒会在扫描中途放弃。</li>
+    <li style="margin:6px 0;">H3 的 turbo 失败会自动回退一次完整扫描，避免端点处于冷却期时被误判成「这条路不通」。</li>
+  </ul>
+
+  <div style="background:#f4f6f9;border-left:3px solid #12161c;border-radius:0 10px 10px 0;padding:14px 16px;margin:18px 0;">
+    <p style="margin:0;font-size:14px;color:#3d4854;">同一套参数先在电脑版上实测：单跳 H3 冷启动 7.0 秒，有网关缓存 7.6 秒；MIM 首次 68.8 秒，固定双跳 10.4 秒，经双层隧道访问 <code style="background:#fff;padding:1px 5px;border-radius:4px;font-size:13px;">cdn-cgi/trace</code> 返回 <code style="background:#fff;padding:1px 5px;border-radius:4px;font-size:13px;">warp=on</code>。手机版移植的是同一组参数。</p>
+  </div>
+
+  <h2 style="margin:30px 0 12px;font-size:21px;">除了 MASQUE，它还能做什么</h2>
+
+  <table style="width:100%;border-collapse:collapse;font-size:14.5px;margin:0 0 16px;">
+    <thead>
+      <tr>
+        <th style="text-align:left;padding:10px 12px;background:#f4f6f9;border:1px solid #e6e9ee;width:34%;">能力</th>
+        <th style="text-align:left;padding:10px 12px;background:#f4f6f9;border:1px solid #e6e9ee;">说明</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding:10px 12px;border:1px solid #e6e9ee;">三套承载</td>
+        <td style="padding:10px 12px;border:1px solid #e6e9ee;">原生 WireGuard / AmneziaWG；Aether 核心的 MASQUE H2、MASQUE H3、GOOL、MASQUE-in-MASQUE；双层伪装 Warp-in-Warp（WG in WG）</td>
+      </tr>
+      <tr>
+        <td style="padding:10px 12px;border:1px solid #e6e9ee;">出口可选</td>
+        <td style="padding:10px 12px;border:1px solid #e6e9ee;">默认 WARP 出口，也可叠加 Psiphon（可选出口地区）或 Tor；出口地区是速度的第一杠杆</td>
+      </tr>
+      <tr>
+        <td style="padding:10px 12px;border:1px solid #e6e9ee;">DNS 防泄漏</td>
+        <td style="padding:10px 12px;border:1px solid #e6e9ee;">隧道内接管解析，支持自定义上游；关闭时也可以让解析走物理链路</td>
+      </tr>
+      <tr>
+        <td style="padding:10px 12px;border:1px solid #e6e9ee;">分流规则</td>
+        <td style="padding:10px 12px;border:1px solid #e6e9ee;">全局 / 绕过大陆 / 黑名单，规则页可编辑直连与阻断条目</td>
+      </tr>
+      <tr>
+        <td style="padding:10px 12px;border:1px solid #e6e9ee;">排障</td>
+        <td style="padding:10px 12px;border:1px solid #e6e9ee;">连接过程逐阶段写日志，可一键导出；失败原因会写成一句人能看懂的话，而不是只转圈</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 style="margin:30px 0 12px;font-size:21px;">安装与升级</h2>
+  <ul style="margin:0 0 12px;padding-left:22px;color:#3d4854;">
+    <li style="margin:6px 0;">仅支持 <strong>arm64-v8a</strong>（近几年的手机都是）。</li>
+    <li style="margin:6px 0;">从旧版本直接覆盖安装即可，设置与订阅保留；首次安装需允许「未知来源」。</li>
+    <li style="margin:6px 0;">包名 <code style="background:#f4f6f9;padding:1px 5px;border-radius:4px;font-size:13.5px;">com.aether.ther</code>，版本 <strong>0.1.31 (32)</strong>，大小 36.9 MB。</li>
+    <li style="margin:6px 0;">SHA256：<code style="background:#f4f6f9;padding:1px 5px;border-radius:4px;font-size:12.5px;word-break:break-all;">5378ac89eafced1db726f05d520da523415e1c953a6b6f9598338fa583a0bb36</code>（下载后可自行校验）</li>
+  </ul>
+
+  <h2 style="margin:30px 0 12px;font-size:21px;">已知限制</h2>
+  <ul style="margin:0 0 12px;padding-left:22px;color:#3d4854;">
+    <li style="margin:6px 0;">MIM 首次连接需要 60–70 秒（核心的验证扫描会把预算走满），之后约 10 秒；这是双层隧道的固有成本。</li>
+    <li style="margin:6px 0;">MASQUE H2 在部分网络会被 TLS 层拦截，这是网络策略，不是客户端能绕过的；优先用 H3。</li>
+    <li style="margin:6px 0;">出口 IP 由 Cloudflare 按网络位置分配，客户端无法指定具体地址；部分服务会按地区限制，属服务端策略。</li>
+  </ul>
+
+  <h2 style="margin:30px 0 14px;font-size:21px;">下载</h2>
+
+  <div style="text-align:center;margin:0 0 6px;">
+    <a href="https://example.com/ther-0.1.31-arm64.apk" style="display:inline-block;margin:6px 6px;padding:14px 26px;border-radius:12px;background:#12161c;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;">下载地址一</a>
+    <a href="https://mirror.example.com/ther-0.1.31-arm64.apk" style="display:inline-block;margin:6px 6px;padding:14px 26px;border-radius:12px;background:#2b6cb0;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;">下载地址二</a>
+    <a href="https://github.com/your-account/ther" style="display:inline-block;margin:6px 6px;padding:14px 26px;border-radius:12px;background:#ffffff;color:#12161c;text-decoration:none;font-weight:600;font-size:15px;border:1px solid #d7dce3;">GitHub 仓库</a>
+  </div>
+
+  <p style="margin:14px 0 0;text-align:center;font-size:12.5px;color:#9aa2ac;">如提示「未知来源」，允许浏览器安装即可。三个按钮的地址为占位符，发布前请替换成真实链接。</p>
+
+</div>
