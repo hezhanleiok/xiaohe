@@ -42,37 +42,36 @@
     <p class="sub">局域网直装包 · 同一 Wi-Fi 下下载</p>
 
     <dl class="meta">
-      <dt>版本</dt><dd>0.1.29 (30, debug)</dd>
+      <dt>版本</dt><dd>0.1.30 (31, debug)</dd>
       <dt>架构</dt><dd>arm64-v8a</dd>
       <dt>大小</dt><dd>36.9 MB</dd>
       <dt>核心</dt><dd>wireguard-go + AWG · Aether 2.3.0 · Psiphon 2.3.0</dd>
     </dl>
 
-    <a class="btn" href="ther-0.1.29-arm64.apk" download>下载 APK</a>
+    <a class="btn" href="ther-0.1.30-arm64.apk" download>下载 APK</a>
 
     <div class="note">
-      <b>本次修复：不再「自动断开重连好几次」+ 首连提速 + 总时间压到 2 分钟</b><br>
-      · <b>你那份日志里最关键的三行</b>：<br>
-        <code>23:58:15.968 Retrying handshake because we stopped hearing back after 15 seconds</code><br>
-        <code>23:58:16.624 隧道连续 12s 传不动数据，判定断流</code><br>
-        <code>23:58:16.626 自动重连 1/2（重新扫描节点）</code><br>
-        引擎在 15s 时<strong>自己刚开始重握手</strong>，我们 0.6 秒后就把整个会话拆了 ——
-        正好杀掉它唯一能自愈的那次重握手，然后花 28s 重来一遍。这就是「断开重连好几次」。<br>
-      · <b>现在断流分三级</b>：12s 只记日志让引擎自愈 → 18s <strong>会话内换端点</strong>
-        （设备不重建、不重扫，换完主动握手，1~2 秒见分晓）→ 36s 才整会话重扫。<br>
-      · <b>扫描 IP 段对齐了</b>：WG / AWG / GOOL 外层现在都改成<strong>标准端口 2408/500/1701/4500 优先</strong>
-        （和你另一个项目一致），高位端口只做兜底。顺带把探活从「小样本全灭就扫全池 3810 个」
-        （那一次花了 23.5s）改成三级 + 8 秒硬预算。<br>
-      · <b>保活</b>：keepalive 上限从 25s 收到 12s（wireguard-go 的「听不到回应」判定是 15s，
-        比它长就等于让保活包自己去触发重握手）。<br>
-      · <b>质量</b>：连上几秒就断的端点会被记 30 分钟、下一轮排到最后，不再反复挑中它。<br>
-      · <b>总时间</b>：单次连接（含所有自动重扫轮次）硬上限 2 分钟，端点循环里也会按这个时间点收手。<br>
-      · 另外：启动失败时会把引擎日志先倒出来（以前失败的 6.5s 一个字原因都没留下）。
+      <b>本次：赛风出口提速四项（含一项实测无效，已如实记录）</b><br>
+      · <b>① 赛风协议列表去掉两个 CDN 变体</b>
+        （<code>FRONTED-MEEK-CDN-OSSH</code>、<code>FRONTED-MEEK-CDN-HTTP-OSSH</code>）。
+        依据：官方 psiphon 的 <code>SupportedTunnelProtocols</code> 只有 13 个、已不含这两个；
+        随包 aether 用的 fork 是 16 个、把它们保留了。它们又是 meek 里最慢的一档。<br>
+      · <b>② 赛风那条只给出站的隧道 MTU 由跟随设备改为固定 1420</b>：设备 MSS=1240，
+        赛风封装后超过它会把一份载荷拆成两个 TCP 段，包数翻倍。1420 加密后 1480 &lt; 1500，不分片。<br>
+      · <b>③ 两个 gVisor 协议栈的拥塞控制由默认 Reno 换成 CUBIC</b>
+        （<code>engine/usernet.go</code>、<code>engine/socks.go</code>）。<br>
+      · <b>④ Aether 核心 netstack 窗口</b>：通过 <code>AETHER_NETSTACK_TCP_RX/TX</code>
+        把 smoltcp 的 TCP 缓冲（即通告窗口）由 High 档默认 2MB/512KB 提到 4MB/1MB。
+        这是 aether 核心 WG / GOOL / MASQUE 比原生核心慢的物理原因。<br>
+      · <b style="color:#b45309">实测结论（真机 speedtest）：以上四项对赛风速度没有可观测提升。</b>
+        0.1.29 手动选 SG 出口 23.53 / 24.86 Mbps，0.1.30 仍是 20 多 Mbps，两者相当。
+        <strong>赛风速度的第一杠杆是出口地区</strong>（自动选到 US 时 6.74 Mbps，手动选 SG 后 ~24 Mbps，
+        差 3.5 倍），这项在设置里改即可，不需要发版。
     </div>
 
     <p class="hint">
       下载后如提示「未知来源」，允许浏览器安装即可。<br>
-      SHA256 <code>4c23ef87ad807ced3cf1edfffa9cd023b1712140608c6a664454d767a23187cd</code>
+      SHA256 <code>815df23eb57f0cafd0fa18d28bed9491cc460c0c6d9db1815ff08e2ce4d9ec68</code>
     </p>
   </main>
 </body>
